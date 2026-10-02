@@ -1,0 +1,24 @@
+# Build outputs and downloadable release assets
+*.exe
+*.dll
+*.pdb
+*.zip
+bin/
+obj/
+
+# Downloaded Microsoft packages and temporary deployment state
+Office Downloads/
+Office/
+Addons/
+.kareer-*/
+ready.json
+*.tmp
+
+# Local verification output, inventory, logs, and editor settings
+Launcher/Verification/
+*.log
+.vs/
+.vscode/
+*.user
+Thumbs.db
+Desktop.ini
