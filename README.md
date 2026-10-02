@@ -148,4 +148,4 @@ Bug reports, documentation improvements, and proposed fixes are welcome. Please 
 
 **Created and provided by KAREER.** Office Studio is an independent project and is not affiliated with or endorsed by Microsoft. Microsoft Office, Windows, and related names are trademarks of their respective owners.
 
-Microsoft installation packages and deployment utilities are downloaded at runtime and are not distributed in this source repository. Microsoft license terms apply to those products. Office Studio source code is available under the [MIT License](LICENSE). Copyright (c) 2026 Ajay Kareer (KAREER).
+Microsoft installation packages and deployment utilities are downloaded at runtime and are not distributed in this source repository. Microsoft license terms apply to those products. Office Studio source code is available under the [MIT License](LICENSE). Copyright (c) 2026 Ajay Kareer.
