@@ -119,8 +119,8 @@ try {
     $script:FailDownloadProcess = $false
     function Assert-MicrosoftSignature { param([string]$Path) }
     function Write-DeploymentEvent {
-        param([string]$Kind, [string]$Message, [int]$Percent = -2)
-        $script:Events.Add([pscustomobject]@{ Kind = $Kind; Message = $Message; Percent = $Percent })
+        param([string]$Kind, [string]$Message, [int]$Percent = -2, [string]$Stage = '', [long]$BytesOnDisk = -1)
+        $script:Events.Add([pscustomobject]@{ Kind = $Kind; Message = $Message; Percent = $Percent; Stage = $Stage; BytesOnDisk = $BytesOnDisk })
     }
     function Save-MicrosoftDownload {
         param([string]$Url, [string]$Path, [string]$Label)
@@ -310,6 +310,18 @@ try {
         Assert-Equal @(Get-ChildItem -LiteralPath $plan.DownloadPath -Directory -Force | Where-Object { $_.Name -like '.kareer-download-*' }).Count 0 'A completed download left staging folders behind'
     }
 
+    Invoke-Check 'Fresh downloads report preparation, download, checks, then completion in order' {
+        $plan = Test-DeploymentPlan -Plan (New-TestPlan -Folder 'DownloadStages')
+        $script:Events.Clear()
+        Invoke-Deployment -Action Download -Plan $plan
+        $stages = @($script:Events | Where-Object { $_.Kind -eq 'stage' } | ForEach-Object { $_.Stage })
+        Assert-Equal $stages[0] 'preparing' 'Download did not begin with preparation'
+        Assert-True ([array]::IndexOf($stages, 'downloading') -gt 0) 'Download stage was missing'
+        Assert-True ([array]::IndexOf($stages, 'checking') -gt [array]::IndexOf($stages, 'downloading')) 'File checks were reported before the download'
+        Assert-Equal $script:Events[$script:Events.Count - 1].Kind 'complete' 'Completion did not follow final checks'
+        Assert-Equal @($script:Events | Where-Object { $_.Stage -eq 'ready' }).Count 0 'Worker bypassed the launchers exit-code/readiness gate'
+    }
+
     Invoke-Check 'A verified repeat download uses no network or deployment process' {
         $plan = New-ReadyFixture
         $script:Downloads.Clear(); $script:Processes.Clear(); $script:Events.Clear()
@@ -317,6 +329,8 @@ try {
         Assert-Equal $script:Downloads.Count 0 'A verified package was downloaded again'
         Assert-Equal $script:Processes.Count 0 'A verified package launched setup'
         Assert-Equal @($script:Events | Where-Object { $_.Kind -eq 'complete' }).Count 1 'Cached reuse did not complete'
+        Assert-True (@($script:Events | Where-Object { $_.Stage -eq 'checking-saved' }).Count -gt 0) 'Saved-file verification had no explicit stage'
+        Assert-Equal @($script:Events | Where-Object { $_.Stage -eq 'downloading' }).Count 0 'Cached reuse falsely reported a download'
     }
 
     Invoke-Check 'Changing suite apps reuses verified files and updates exclusions' {
@@ -351,9 +365,10 @@ try {
         $resume = Get-ResumeStage -Plan $plan
         Assert-Equal $resume.Path $partial.DownloadPath 'Partial download was discarded'
         Assert-Equal $resume.Version '16.0.19127.20154' 'Partial version was not pinned'
-        $script:Processes.Clear()
+        $script:Processes.Clear(); $script:Events.Clear()
         Invoke-Deployment -Action Download -Plan $plan
         Assert-True ($script:Processes[0].Arguments.Contains($partial.DownloadPath)) 'Retry did not pass the same folder to Microsoft'
+        Assert-True (@($script:Events | Where-Object { $_.Stage -eq 'reusing' }).Count -gt 0) 'Resumed download had no reuse stage'
         $null = Test-ReadyState -Plan $plan
     }
 

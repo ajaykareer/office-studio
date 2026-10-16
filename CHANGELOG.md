@@ -1,5 +1,14 @@
 # Changelog
 
+## 1.3.0
+
+- Added explicit preparation, download, file-check, and ready stages driven by worker events.
+- Added reassuring messages for long downloads, saved-file reuse, and unchanged file sizes while Microsoft setup is still responding.
+- Kept elapsed time and live MB visible without an invented ETA or overall percentage.
+- Added a Windows ready notification, background taskbar attention, and a tray icon that returns to the app without starting installation.
+- Highlighted Install Office when the package is ready, while preserving license consent.
+- Added stage-order, progress, cancellation-notification, and native notification checks.
+
 ## 1.2.2
 
 - Fixed a startup crash caused by updating the file-size label from a background thread before the WPF event loop was running.

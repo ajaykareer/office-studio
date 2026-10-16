@@ -21,7 +21,7 @@ using Microsoft.Win32;
 [assembly: AssemblyDescription("Choose, download, and install Microsoft Office. Created and provided by KAREER.")]
 [assembly: AssemblyCompany("KAREER")]
 [assembly: AssemblyProduct("Office Studio")]
-[assembly: AssemblyVersion("1.2.2.0")]
+[assembly: AssemblyVersion("1.3.0.0")]
 
 namespace Kareer.OfficeStudio
 {
@@ -57,24 +57,26 @@ namespace Kareer.OfficeStudio
             bool test = args.Length == 2 && args[0] == "--self-test";
             bool inventoryTest = args.Length == 2 && args[0] == "--inventory-test";
             bool startupTest = args.Length == 2 && args[0] == "--startup-test";
+            bool notificationTest = args.Length == 2 && args[0] == "--notification-test";
             try
             {
                 bool created;
-                using (var mutex = new Mutex(true, "Local\\KAREER.OfficeStudio" + (test || inventoryTest || startupTest ? ".Test" : ""), out created))
+                using (var mutex = new Mutex(true, "Local\\KAREER.OfficeStudio" + (test || inventoryTest || startupTest || notificationTest ? ".Test" : ""), out created))
                 {
                     if (!created) { MessageBox.Show("Office Studio is already open.", "Office Studio"); return 1; }
                     var app = new Application();
-                    var studio = new Studio(test || inventoryTest || startupTest, startupTest);
+                    var studio = new Studio(test || inventoryTest || startupTest || notificationTest, startupTest);
                     if (test) studio.Window.ContentRendered += delegate { studio.SelfTest(args[1]); };
                     if (inventoryTest) studio.Window.ContentRendered += async delegate { await studio.InventoryTest(args[1]); };
                     if (startupTest) studio.Window.ContentRendered += async delegate { await studio.StartupTest(args[1]); };
+                    if (notificationTest) studio.Window.ContentRendered += async delegate { await studio.NotificationTest(args[1]); };
                     app.Run(studio.Window);
                     return studio.ExitCode;
                 }
             }
             catch (Exception ex)
             {
-                if (test || inventoryTest || startupTest) File.WriteAllText(Path.Combine(args[1], "fatal.txt"), ex.ToString());
+                if (test || inventoryTest || startupTest || notificationTest) File.WriteAllText(Path.Combine(args[1], "fatal.txt"), ex.ToString());
                 else MessageBox.Show("Office Studio couldn't start.\n\n" + ex.Message, "Office Studio", MessageBoxButton.OK, MessageBoxImage.Error);
                 return 1;
             }
@@ -194,8 +196,9 @@ namespace Kareer.OfficeStudio
                 else if (busy || maintenanceRunning) { e.Cancel = true; MessageBox.Show(Window, "Setup is still running. Keep Office Studio open until the current operation finishes.\n\nFor installation, use Cancel in Microsoft's setup window if offered. You can see progress in Activity.", "Operation in progress", MessageBoxButton.OK, MessageBoxImage.Information); }
                 else { SavePreferences(); if (logWindow != null) logWindow.Close(); if (maintenanceWindow != null) maintenanceWindow.Close(); CleanRuntime(); }
             };
+            Window.Closed += delegate { DisposeDownloadTray(); };
             timer = new DispatcherTimer { Interval = TimeSpan.FromSeconds(1) };
-            timer.Tick += delegate { if (busy) Find<TextBlock>("ProgressLabel").Text = clock.Elapsed.ToString(@"hh\:mm\:ss"); };
+            timer.Tick += delegate { if (busy) { Find<TextBlock>("ProgressLabel").Text = "Elapsed " + clock.Elapsed.ToString(@"hh\:mm\:ss"); RenderDownloadExperience(); } };
             initialized = true;
             SelectionChanged();
             Log("Created and provided by KAREER. Select your edition and apps to begin.");
@@ -241,6 +244,9 @@ namespace Kareer.OfficeStudio
             // Consent is tied to the chosen package, not remembered across changes/restarts.
             if (!licenseReset) { licenseReset = true; License.IsChecked = false; licenseReset = false; }
             ready = LooksReady(MakePlan());
+            cancelRequested = false;
+            downloadStage = ready ? "ready" : "";
+            if (!testMode) DisposeDownloadTray();
             Progress.IsIndeterminate = false;
             Progress.Value = ready ? 100 : 0;
             Find<TextBlock>("ProgressLabel").Text = ready ? "DOWNLOADED" : "";
@@ -258,6 +264,9 @@ namespace Kareer.OfficeStudio
             Download.IsEnabled = !busy && !maintenanceRunning && HasSuiteApp();
             Install.IsEnabled = !busy && !maintenanceRunning && ready && License.IsChecked == true && HasSuiteApp();
             Download.Content = "Download";
+            Download.Background = (Brush)new BrushConverter().ConvertFrom(ready ? "#E9EDF4" : "#147C71");
+            Download.Foreground = ready ? (Brush)new BrushConverter().ConvertFrom("#27364D") : Brushes.White;
+            Install.Background = (Brush)new BrushConverter().ConvertFrom(ready ? "#147C71" : "#172F39");
             var abort = Find<Button>("AbortButton");
             abort.Visibility = busy && activeAction == "Download" ? Visibility.Visible : Visibility.Collapsed;
             abort.IsEnabled = downloadJob != null && !cancelRequested;
@@ -271,6 +280,7 @@ namespace Kareer.OfficeStudio
                 label.FontWeight = i + 1 == step ? FontWeights.SemiBold : FontWeights.Normal;
             }
             UpdateMaintenanceButtons();
+            RenderDownloadExperience();
         }
         void RefreshSavedSize() { savedSizeRefresh = RefreshSavedSizeAsync(); }
         async Task RefreshSavedSizeAsync()
@@ -289,7 +299,7 @@ namespace Kareer.OfficeStudio
             // The first call runs in the constructor, before Application.Run has
             // installed a WPF synchronization context. Always dispatch UI writes,
             // including the error path, instead of trusting an await continuation.
-            Action update = delegate { if (request == cacheSizeRequest) label.Text = message; };
+            Action update = delegate { if (request == cacheSizeRequest && !(busy && activeAction == "Download" && lastDownloadBytes >= 0)) label.Text = message; };
             if (Window.Dispatcher.CheckAccess()) update();
             else if (!Window.Dispatcher.HasShutdownStarted)
             {
@@ -438,6 +448,8 @@ namespace Kareer.OfficeStudio
             Status.Text = action == "Download" ? "Preparing your download…" : "Installing your Office…";
             Detail.Text = action == "Download" ? "Connecting to Microsoft. Watch the activity log for details." : "Verifying your saved package. Microsoft setup will show installation progress.";
             clock.Restart(); timer.Start();
+            Find<TextBlock>("ProgressLabel").Text = "Elapsed 00:00:00";
+            if (action == "Download") BeginDownloadExperience();
             try
             {
                 Directory.CreateDirectory(Path.Combine(stateRoot, "Logs"));
@@ -485,10 +497,11 @@ namespace Kareer.OfficeStudio
                 {
                     ready = LooksReady(plan);
                     if (!ready) throw new InvalidOperationException("The download finished without a matching complete package. Open Activity, then retry Download.");
-                    Status.Text = "Your apps are ready to install";
+                    SetDownloadStage("ready");
                     Detail.Text = "Download complete. Accept the license terms, then choose Install Office.";
                     if (!string.IsNullOrEmpty(lastCompletion)) Detail.Text = lastCompletion;
                     Find<TextBlock>("ProgressLabel").Text = "DOWNLOADED";
+                    NotifyDownloadReady();
                 }
                 else
                 {
@@ -502,6 +515,7 @@ namespace Kareer.OfficeStudio
             catch (OperationCanceledException)
             {
                 Progress.IsIndeterminate = false; Progress.Value = 0; ready = false;
+                DisposeDownloadTray();
                 Status.Text = "Download aborted";
                 Detail.Text = "Partial files kept. Choose Download with the same edition, language and folder to retry.";
                 Find<TextBlock>("ProgressLabel").Text = "STOPPED";
@@ -517,6 +531,7 @@ namespace Kareer.OfficeStudio
                 Log("ERROR: " + ex.Message);
                 // Let a failed installation retry only if the original package still appears ready.
                 ready = action == "Install" && LooksReady(plan);
+                if (action == "Download") DisposeDownloadTray();
                 ShowActivity();
             }
             finally
@@ -550,16 +565,24 @@ namespace Kareer.OfficeStudio
                     string kind = data.ContainsKey("kind") ? Convert.ToString(data["kind"]) : "log";
                     string message = data.ContainsKey("message") ? Convert.ToString(data["message"]) : "";
                     HandleMaintenanceEvent(kind, message, data);
+                    bool downloading = busy && activeAction == "Download" && !inventoryScanning && !cancelRequested;
+                    if (downloading && kind == "stage" && data.ContainsKey("stage"))
+                    {
+                        string stage = Convert.ToString(data["stage"]);
+                        if (stage != "ready") { SetDownloadStage(stage); Detail.Text = message; }
+                    }
+                    if (downloading && data.ContainsKey("bytesOnDisk")) UpdateDownloadBytes(Convert.ToInt64(data["bytesOnDisk"]), clock.Elapsed.TotalSeconds);
                     if (!inventoryScanning && !cancelRequested && (kind == "status" || kind == "progress"))
                     {
                         Detail.Text = message;
-                        if (busy && activeAction == "Download") Status.Text = message.StartsWith("Checking", StringComparison.OrdinalIgnoreCase) || message.StartsWith("Verifying file", StringComparison.OrdinalIgnoreCase) ? "Checking your downloaded files…" : "Downloading your Office…";
                     }
                     if (!inventoryScanning && !cancelRequested && kind == "progress" && data.ContainsKey("percent"))
                     {
                         double value = Convert.ToDouble(data["percent"]);
-                        Progress.IsIndeterminate = value < 0;
-                        if (value >= 0) Progress.Value = Math.Max(0, Math.Min(100, value));
+                        // A percentage for an individual addon is not an overall
+                        // Office percentage. Keep the download bar indeterminate.
+                        Progress.IsIndeterminate = downloading || value < 0;
+                        if (!downloading && value >= 0) Progress.Value = Math.Max(0, Math.Min(100, value));
                     }
                     if (kind == "error") lastError = message;
                     if (kind == "complete") { workerCompleted = true; lastCompletion = message; }
@@ -712,12 +735,14 @@ namespace Kareer.OfficeStudio
                 License.IsChecked = true; check(Install.IsEnabled, "Ready download and consent enable installation");
                 apps["Word"].IsChecked = false; check(!Install.IsEnabled && License.IsChecked == false, "Selection changes invalidate readiness and consent");
                 busy = true; activeAction = "Download"; downloadJob = new DownloadJob(); UpdateButtons();
+                BeginDownloadExperience();
                 Find<StackPanel>("OptionsPanel").IsEnabled = false; License.IsEnabled = false;
                 check(Find<Button>("AbortButton").IsEnabled && Find<Button>("AbortButton").Visibility == Visibility.Visible, "Download exposes Abort button");
                 check(Find<TextBlock>("StepDownload").FontWeight == FontWeights.SemiBold && Find<TextBlock>("StepChoose").FontWeight == FontWeights.Normal, "Download highlights sidebar step 02");
-                HandleOutput("@@{\"kind\":\"progress\",\"message\":\"Downloading shared Office files · 1.24 GB received\",\"percent\":-1}", false);
+                HandleOutput("@@{\"kind\":\"stage\",\"stage\":\"downloading\",\"message\":\"Downloading shared Office files for your selected apps.\"}", false);
+                HandleOutput("@@{\"kind\":\"progress\",\"message\":\"Microsoft setup is running. File sizes may include reserved space.\",\"bytesOnDisk\":1300234240,\"percent\":-1}", false);
                 check(Progress.IsIndeterminate, "Unknown progress is indeterminate");
-                Status.Text = "Downloading your Office…";
+                Find<TextBlock>("ProgressLabel").Text = "Elapsed 00:02:35";
                 Capture(Path.Combine(outputDirectory, "03-downloading.png"));
                 Window.Width = 990; Window.Height = 730; Capture(Path.Combine(outputDirectory, "03-downloading-compact.png"));
                 Window.Width = 1160; Window.Height = 880;
@@ -742,6 +767,7 @@ namespace Kareer.OfficeStudio
                 check(Find<TextBlock>("StepInstall").FontWeight == FontWeights.SemiBold, "Ready package highlights sidebar step 03");
                 Capture(Path.Combine(outputDirectory, "04-ready.png"));
                 Window.Width = 990; Window.Height = 730; Capture(Path.Combine(outputDirectory, "05-compact.png"));
+                TestDownloadExperience(outputDirectory, check);
                 TestMaintenanceUi(outputDirectory, check);
                 results.Add("No Microsoft download, installation, registry changes, or preferences written by this test.");
                 ExitCode = 0;

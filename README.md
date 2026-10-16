@@ -8,12 +8,12 @@ A Windows desktop app for choosing, downloading, installing, and managing Micros
 
 **Created and provided by KAREER**
 
-![Version](https://img.shields.io/badge/version-1.2.2-147C71)
+![Version](https://img.shields.io/badge/version-1.3.0-147C71)
 [![License: MIT](https://img.shields.io/badge/license-MIT-147C71)](LICENSE)
 ![Platform](https://img.shields.io/badge/platform-Windows-0078D4)
 ![Runtime](https://img.shields.io/badge/.NET_Framework-4.8-512BD4)
 
-[Download v1.2.2](https://github.com/ajaykareer/office-studio/releases/tag/v1.2.2) · [Features](#features) · [Build from source](#build-from-source) · [Contribute](CONTRIBUTING.md) · [Release history](CHANGELOG.md)
+[Download v1.3.0](https://github.com/ajaykareer/office-studio/releases/tag/v1.3.0) · [Features](#features) · [Build from source](#build-from-source) · [Contribute](CONTRIBUTING.md) · [Release history](CHANGELOG.md)
 
 </div>
 
@@ -23,7 +23,7 @@ Office Studio puts Office edition selection, app checkboxes, download activity, 
 
 ## Getting started
 
-1. Open [Releases](https://github.com/ajaykareer/office-studio/releases/latest) and download **Office Studio 1.2.2.exe** from the release's **Assets** list.
+1. Open [Releases](https://github.com/ajaykareer/office-studio/releases/latest) and download **Office Studio 1.3.0.exe** from the release's **Assets** list.
 2. Run the EXE and approve the Windows administrator prompt.
 3. Select your Office edition and the apps you need.
 4. Choose a language, architecture, and download folder, then click **Download**.
@@ -42,6 +42,9 @@ The current EXE is not code-signed; Windows may display an unknown-publisher or 
 | App checkboxes | Choose Word, Excel, PowerPoint, Outlook, OneNote, Access, and available optional apps. Includes Select all and Clear. |
 | Language and architecture | Eight language choices and 32-bit or 64-bit Office, where supported by Windows. |
 | Download activity | Shows existing file size in MB, an animated progress bar, elapsed time, and an activity log. |
+| Clear download stages | Preparation, download, file checks, and ready status follow the worker's actual steps. |
+| Reassuring guidance | Explains long downloads, saved-file reuse, and unchanged file sizes without inventing a time estimate. |
+| Ready notification | Requests a Windows notification when the verified package is ready; click it to return to the app. |
 | Abort download | Stops the download worker and its child processes while retaining partial files. |
 | Automatic file reuse | Checks matching completed packages and reuses matching partial download folders when possible. |
 | Separate installation | Downloading does not automatically install Office or its optional addons. |
@@ -70,7 +73,10 @@ OneDrive and Teams use separate Microsoft installers. Publisher is offered only 
 ## Download behavior
 
 - **Shared package:** Microsoft downloads shared Office installation files even when only a few apps are selected. The generated installation configuration excludes unchecked suite apps; selecting only Word does not imply a small Word-only download.
-- **Progress:** The Office download does not expose a reliable overall percentage. File sizes can include reserved space and are not a measurement of network bytes received.
+- **Progress:** The Office download does not expose a reliable overall percentage or ETA. The bar stays animated until verification finishes. File sizes can include reserved space and are not a measurement of network bytes received.
+- **Stages:** The app shows preparation, downloading, file checks, and readiness. A complete saved package can skip downloading; checking its large files may still take time.
+- **Unchanged sizes:** A recent Microsoft setup heartbeat with unchanged file sizes triggers a reassuring message, rather than labelling the download stalled.
+- **Ready notification:** You can minimize the window while downloading. After setup exits successfully and the saved package is checked, the app requests a Windows notification and draws attention to the taskbar if it is in the background. Clicking the notification or tray icon returns to the window; installation still needs your action and license consent. Windows notification settings may suppress the banner, so the app also keeps its ready message visible.
 - **Resume:** Keep the same edition, architecture, language, and folder. Click **Download** again; matching files are reused automatically where possible. Microsoft may download an incomplete file again.
 - **Saved versions:** Reusing a completed package keeps its saved Office build. To request a fresh package, select a different download folder.
 - **Abort scope:** Abort applies to downloads. For installation, use Cancel in Microsoft's setup window if offered. Office Studio does not force-kill installations or uninstallations.
@@ -105,7 +111,7 @@ Install the **.NET Framework 4.8 Developer Pack**, then run from the repository 
 powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\Launcher\Build.ps1
 ```
 
-Output: `Office Studio 1.2.2.exe` in the repository root. The interface, PowerShell workers, and icon are embedded in the executable; it still relies on the Windows runtimes listed above.
+Output: `Office Studio 1.3.0.exe` in the repository root. The interface, PowerShell workers, and icon are embedded in the executable; it still relies on the Windows runtimes listed above.
 
 Run the regression checks on an interactive Windows desktop:
 

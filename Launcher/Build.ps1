@@ -2,7 +2,7 @@
 [CmdletBinding()]
 param([switch]$Test, [string]$OutputPath)
 $ErrorActionPreference = 'Stop'
-$output = Join-Path (Split-Path $PSScriptRoot -Parent) 'Office Studio 1.2.2.exe'
+$output = Join-Path (Split-Path $PSScriptRoot -Parent) 'Office Studio 1.3.0.exe'
 if ($OutputPath) { $output = [IO.Path]::GetFullPath($OutputPath) }
 $compiler = Join-Path $env:WINDIR 'Microsoft.NET\Framework64\v4.0.30319\csc.exe'
 if (-not (Test-Path -LiteralPath $compiler)) { $compiler = Join-Path $env:WINDIR 'Microsoft.NET\Framework\v4.0.30319\csc.exe' }
@@ -38,6 +38,7 @@ $compileArgs += '/resource:' + $iconPath + ',Kareer.ico'
 $compileArgs += Join-Path $PSScriptRoot 'OfficeStudio.cs'
 $compileArgs += Join-Path $PSScriptRoot 'MaintenanceUi.cs'
 $compileArgs += Join-Path $PSScriptRoot 'DownloadJob.cs'
+$compileArgs += Join-Path $PSScriptRoot 'DownloadExperience.cs'
 & $compiler $compileArgs
 if ($LASTEXITCODE -ne 0) { throw "C# compilation failed with exit code $LASTEXITCODE." }
 Write-Host "Built: $output"

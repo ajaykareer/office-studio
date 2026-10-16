@@ -17,9 +17,11 @@ $ProgressPreference = 'SilentlyContinue'
 $script:RebootRequired = $false
 
 function Write-DeploymentEvent {
-    param([string]$Kind, [string]$Message, [int]$Percent = -2)
+    param([string]$Kind, [string]$Message, [int]$Percent = -2, [string]$Stage = '', [long]$BytesOnDisk = -1)
     $event = [ordered]@{ kind = $Kind; message = $Message }
     if ($Percent -ne -2) { $event.percent = $Percent }
+    if ($Stage) { $event.stage = $Stage }
+    if ($BytesOnDisk -ge 0) { $event.bytesOnDisk = $BytesOnDisk }
     [Console]::Out.WriteLine('@@' + (ConvertTo-Json -InputObject $event -Compress -Depth 8))
     [Console]::Out.Flush()
 }
@@ -364,8 +366,8 @@ function Invoke-DeploymentProcess {
                             }
                         }
                     }
-                    $message = 'Office download active. Files on disk: {0:N1} MB (may include reserved space). Elapsed {1}. Waiting for Microsoft to finish.' -f ($receivedBytes / 1MB), $elapsed.Elapsed.ToString('hh\:mm\:ss')
-                    Write-DeploymentEvent -Kind progress -Message $message -Percent -1
+                    $message = 'Microsoft setup is running. Office files on disk: {0:N1} MB. File sizes may include reserved space.' -f ($receivedBytes / 1MB)
+                    Write-DeploymentEvent -Kind progress -Message $message -Percent -1 -BytesOnDisk $receivedBytes
                 } else {
                     Write-DeploymentEvent -Kind progress -Message "$Label Please keep Office Studio open." -Percent -1
                 }
@@ -394,7 +396,7 @@ function Get-ReusableDownload {
         foreach ($name in @('Branch', 'Channel', 'Architecture', 'Language', 'DownloadPath')) {
             if ($previous.$name -cne $Plan.$name) { return $null }
         }
-        Write-DeploymentEvent -Kind status -Message 'Checking existing Office files before reusing this download...'
+        Write-DeploymentEvent -Kind stage -Stage 'checking-saved' -Message 'Checking your saved files. A complete matching package can be reused without another Office download.'
         return (Test-ReadyState -Plan $previous)
     } catch {
         Write-DeploymentEvent -Kind log -Message ('Saved package could not be reused: ' + $_.Exception.Message)
@@ -446,6 +448,7 @@ function Invoke-DeploymentCore {
         return
     }
     if ($Action -eq 'Download') {
+        Write-DeploymentEvent -Kind stage -Stage 'preparing' -Message 'Preparing Microsoft setup and looking for matching saved files.'
         [void][IO.Directory]::CreateDirectory($Plan.DownloadPath)
         $readyPath = Join-Path $Plan.DownloadPath 'ready.json'
         Assert-NoReparsePoint -Path $readyPath
@@ -458,16 +461,19 @@ function Invoke-DeploymentCore {
             Remove-Item -LiteralPath $readyPath -Force
             foreach ($addon in @(Get-AddonDownloads -Plan $Plan)) {
                 if (@(Get-AddonDownloads -Plan $cached.Plan | ForEach-Object { $_.RelativePath }) -notcontains $addon.RelativePath) {
+                    Write-DeploymentEvent -Kind stage -Stage 'downloading' -Message ('Reusing your Office package and downloading the selected ' + $addon.Name + ' addon.')
                     Save-MicrosoftDownload -Url $addon.Url -Path (Join-Path $Plan.DownloadPath $addon.RelativePath) -Label $addon.Name
                 }
             }
             Assert-NoReparsePoint -Path $configPath
             [IO.File]::WriteAllText($configPath, (New-OfficeConfiguration -Plan $Plan -OfficeVersion $cached.OfficeVersion), (New-Object Text.UTF8Encoding($false)))
+            Write-DeploymentEvent -Kind stage -Stage 'checking' -Message 'Checking the saved package against your new app selection.'
             $null = Write-ReadyState -Plan $Plan -Payload (Get-OfficePayload -Plan $Plan -OfficeVersion $cached.OfficeVersion)
             Write-DeploymentEvent -Kind complete -Message ('Reused Office ' + $cached.OfficeVersion + ' for your selected apps. Ready to install.') -Percent 100
             return
         }
         if (Test-Path -LiteralPath $readyPath -PathType Leaf) { Remove-Item -LiteralPath $readyPath -Force }
+        Write-DeploymentEvent -Kind stage -Stage 'preparing' -Message 'Getting Microsoft setup ready for your download.'
         Assert-NoReparsePoint -Path $configPath
         $toolReady = $false
         if (Test-Path -LiteralPath $setupPath -PathType Leaf) {
@@ -486,7 +492,13 @@ function Invoke-DeploymentCore {
         $stagePlan.DownloadPath = $stagePath
         $stageConfig = Join-Path $stagePath 'Config.xml'
         [IO.File]::WriteAllText($stageConfig, (New-OfficeConfiguration -Plan $stagePlan -OfficeVersion $resumeVersion), (New-Object Text.UTF8Encoding($false)))
+        if ($null -ne $resume) {
+            Write-DeploymentEvent -Kind stage -Stage 'reusing' -Message 'Checking and reusing your saved files. Microsoft will download any files it still needs.'
+        } else {
+            Write-DeploymentEvent -Kind stage -Stage 'downloading' -Message 'Downloading shared Office files for your selected apps.'
+        }
         $null = Invoke-DeploymentProcess -FilePath $setupPath -Arguments ('/download "' + $stageConfig + '"') -Label 'Downloading Office files...' -Plan $Plan -SuccessExitCodes @(0) -MonitorPath (Join-Path $stagePath 'Office')
+        Write-DeploymentEvent -Kind status -Message 'Microsoft finished the Office download. Saving the files to your package folder.'
         $stagedPayload = Get-OfficePayload -Plan $stagePlan -OfficeVersion $resumeVersion
         $expectedRoot = $Plan.DownloadPath.TrimEnd('\') + '\'
         foreach ($file in $stagedPayload.Files) {
@@ -506,10 +518,12 @@ function Invoke-DeploymentCore {
         Remove-Item -LiteralPath $resolvedStage -Recurse -Force
         $payload = Get-OfficePayload -Plan $Plan -OfficeVersion $stagedPayload.Version
         foreach ($addon in @(Get-AddonDownloads -Plan $Plan)) {
+            Write-DeploymentEvent -Kind stage -Stage 'downloading' -Message ('Office files are saved. Downloading the selected ' + $addon.Name + ' addon.')
             Save-MicrosoftDownload -Url $addon.Url -Path (Join-Path $Plan.DownloadPath $addon.RelativePath) -Label $addon.Name
         }
         # Pin /configure to the exact version that was downloaded successfully.
         [IO.File]::WriteAllText($configPath, (New-OfficeConfiguration -Plan $Plan -OfficeVersion $payload.Version), (New-Object Text.UTF8Encoding($false)))
+        Write-DeploymentEvent -Kind stage -Stage 'checking' -Message 'Checking the downloaded files before making your package ready to install.'
         $null = Write-ReadyState -Plan $Plan -Payload $payload
         Write-DeploymentEvent -Kind complete -Message 'Download complete. Your selected applications are ready. Click Install when you are ready.' -Percent 100
         return
